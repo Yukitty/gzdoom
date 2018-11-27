@@ -41,6 +41,7 @@
 #include "r_data/models/models.h"
 #include "r_data/models/models_ue1.h"
 #include "r_data/models/models_obj.h"
+#include "r_data/models/models_smd.h"
 #include "i_time.h"
 
 #ifdef _MSC_VER
@@ -433,6 +434,10 @@ static unsigned FindModel(const char * path, const char * modelfile)
 	{
 		model = new FOBJModel;
 	}
+	else if ( (size_t)fullname.LastIndexOf(".smd") == fullname.Len() - 4 )
+	{
+		model = new FSMDModel;
+	}
 	else if (!memcmp(buffer, "DMDM", 4))
 	{
 		model = new FDMDModel;
@@ -597,6 +602,27 @@ static void ParseModelDefLump(int Lump)
 					{
 						Printf("%s: model not found in %s\n", sc.String, path.GetChars());
 					}
+				}
+				else if (sc.Compare("modelanim"))
+				{
+					// model index
+					sc.MustGetNumber();
+					index = sc.Number;
+					if (index < 0 || index >= MAX_MODELS_PER_FRAME)
+					{
+						sc.ScriptError("ModelAnim out of bounds in %s", smf.type->TypeName.GetChars());
+					}
+
+					sc.MustGetString();
+					//sc.String; // anim name
+
+					sc.MustGetString();
+					FixPathSeperator(sc.String);
+					if (smf.modelIDs[index] == -1)
+					{
+						Printf("model %u not defined in %s\n", index, path.GetChars());
+					}
+					/// TODO: Load this and do something with it.
 				}
 				else if (sc.Compare("scale"))
 				{
