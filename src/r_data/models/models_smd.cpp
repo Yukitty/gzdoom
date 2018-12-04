@@ -24,51 +24,6 @@
 #include "sc_man.h"
 #include "v_text.h"
 
-static FTextureID dummyMtl;
-
-/**
- * Initialize model data to nil
- */
-FSMDModel::FSMDModel()
-{
-}
-
-/**
- * Remove the data that was loaded
- */
-FSMDModel::~FSMDModel()
-{
-	nodelist.Clear();
-	tris.Clear();
-}
-
-FSMDModel::Node *FSMDModel::GetNodeById(TArray<NodeName> nodeindex, int id)
-{
-	FString name;
-
-	for (unsigned int i = 0; i < nodeindex.Size(); i++)
-	{
-		if (nodeindex[i].id == id)
-		{
-			name = nodeindex[i].name;
-			break;
-		}
-	}
-
-	if (name.IsNotEmpty())
-	{
-		for (unsigned int i = 0; i < nodelist.Size(); i++)
-		{
-			if (nodelist[i].name == name)
-			{
-				return &nodelist[i];
-			}
-		}
-	}
-
-	return nullptr;
-}
-
 /**
  * Parse an x-Dimensional vector
  *
@@ -103,7 +58,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 	FString smdName = Wads.GetLumpFullPath(lumpnum);
 	FString smdBuf(buffer, length);
 
-	TArray<NodeName> nodeindex;
+	TMap<unsigned int, FString> nodeIndex;
 
 	sc.OpenString(smdName, smdBuf);
 
@@ -120,26 +75,51 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 		if (sc.Compare("nodes"))
 		{
 			int index, parent;
+			FString name;
 			Node node;
+
+			TMap<unsigned int, unsigned int> parents;
+
 			while (!sc.CheckString("end"))
 			{
 				sc.MustGetNumber();
 				index = sc.Number;
 				sc.MustGetString();
-				node.name = sc.String;
-				sc.MustGetNumber();
-				parent = sc.Number;
+				name = sc.String;
 
-				nodeindex.Push(NodeName{index, parent, node.name});
-				nodelist.Push(node);
+				nodeIndex.Insert(index, name);
+
+				sc.MustGetNumber();
+				if (sc.Number > -1)
+				{
+					parents.Insert(index, sc.Number);
+				}
+
+
+ 				node.name = name;
+				nodes.Insert(name, node);
 			}
 
-			// Link up parents properly.
+			// Link up parents properly now that all of the bones have been defined.
+			for (unsigned int i = 0, checked = 0; checked < nodeIndex.CountUsed(); i++)
+			{
+				if (nodeIndex.CheckKey(i))
+				{
+					++checked;
+					if (parents.CheckKey(i))
+					{
+						nodes[nodeIndex[i]].parent = &nodes[nodeIndex[parents[i]]];
+					}
+					else
+					{
+						nodes[nodeIndex[i]].parent = nullptr;
+					}
+				}
+			}
 		}
 		else if (sc.Compare("skeleton"))
 		{
 			int time = -1;
-			Node *nodep = nullptr;
 			FVector3 pos, rot;
 			while (!sc.CheckString("end"))
 			{
@@ -155,14 +135,12 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 				else
 				{
 					sc.MustGetNumber();
-					nodep = GetNodeById(nodeindex, sc.Number);
-					if (!nodep)
+					if (!nodeIndex.CheckKey(sc.Number))
 					{
 						sc.ScriptError("Reference to undefined node id %i\n", sc.Number);
 					}
 
-					Node &node = *nodep;
-
+					Node &node = nodes[nodeIndex[sc.Number]];
 					pos = ParseVector<FVector3,3>(sc);
 					rot = ParseVector<FVector3,3>(sc);
 
@@ -176,41 +154,51 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 		}
 		else if (sc.Compare("triangles"))
 		{
-			int weightCount, i, j;
-			Triangle tri;
+			FTextureID material;
+			Triangle triangle;
+
+			unsigned int i, j, weightCount;
+			Node *node;
+			float totalWeight;
+
+			surfaceList.Clear();
+
 			while (!sc.CheckString("end"))
 			{
 				sc.MustGetString();
+				material = LoadSkin("", sc.String);
 
-				tri.mat = LoadSkin("", sc.String);
-
-				if (!tri.mat.isValid())
+				if (!material.isValid())
 				{
 					// Relative to model file path?
-					tri.mat = LoadSkin(fn, sc.String);
+					material = LoadSkin(fn, sc.String);
 				}
 
-				if (!tri.mat.isValid())
+				if (!material.isValid())
 				{
 					sc.ScriptMessage("Material %s not found.", sc.String);
-					tri.mat = LoadSkin("", "-NOFLAT-");
+					material = LoadSkin("", "-NOFLAT-");
 				}
 
 				for (i = 0; i < 3; i++)
 				{
-					sc.MustGetNumber();
-					tri.verts[i].node = GetNodeById(nodeindex, sc.Number);
+					Vertex &v = triangle.vertex[i];
 
-					if (!tri.verts[i].node)
+					sc.MustGetNumber();
+					if (!nodeIndex.CheckKey(sc.Number))
 					{
 						sc.ScriptError("Reference to undefined node id %i\n", sc.Number);
 					}
+					v.node = &nodes[nodeIndex[sc.Number]];
 
-					tri.verts[i].pos = ParseVector<FVector3,3>(sc);
-					tri.verts[i].norm = ParseVector<FVector3,3>(sc);
-					tri.verts[i].tex = ParseVector<FVector2,2>(sc);
+					v.pos = ParseVector<FVector3,3>(sc);
+					v.normal = ParseVector<FVector3,3>(sc);
+					v.texCoord = ParseVector<FVector2,2>(sc);
 
-					/// TODO: process and store weights.
+					// Flip the UV because Doom textures.
+					v.texCoord.Y = 1.0 - v.texCoord.Y;
+
+					/// \todo Fully process and store weights.
 					if (sc.CheckNumber())
 					{
 						if (sc.Crossed)
@@ -220,18 +208,46 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 						}
 
 						weightCount = sc.Number;
+						totalWeight = 0.0f;
 						for (j = 0; j < weightCount; j++)
 						{
 							sc.MustGetNumber();
-							//bone = sc.Number;
+							if (!nodeIndex.CheckKey(sc.Number))
+							{
+								sc.ScriptError("Reference to undefined node id %i\n", sc.Number);
+							}
+							node = &nodes[nodeIndex[sc.Number]];
 
+							// HACK: If node weights add up to 100% or more, change root bone.
 							sc.MustGetFloat();
-							//weight = sc.Float;
+							totalWeight += sc.Float;
+							if (totalWeight > 0.9999f)
+							{
+								v.node = node;
+							}
 						}
 					}
 				}
 
-				tris.Push(tri);
+				// Find an existing surface with the matching material.
+				Surface *surface = nullptr;
+				for (auto i = surfaceList.begin(); i != surfaceList.end(); i++)
+				{
+					if (i->material == material)
+					{
+						surface = &(*i);
+						break;
+					}
+				}
+
+				// New material? Add a new surface!
+				if (!surface)
+				{
+					surface = &surfaceList[surfaceList.Reserve(1)];
+					surface->material = material;
+				}
+
+				surface->triangle.Push(triangle);
 			}
 		}
 		else
@@ -253,8 +269,6 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 /**
  * Find the index of the frame with the given name
  *
- * OBJ models are not animated, so this always returns 0
- *
  * @param name The name of the frame
  * @return The index of the frame
  */
@@ -273,28 +287,90 @@ int FSMDModel::FindFrame(const char* name)
  * @param inter Unused
  * @param translation The translation for the skin
  */
-void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture * skin, int frameno, int frameno2, double inter, int translation)
+void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int frameno, int frameno2, double inter, int translation)
 {
-	if (tris.Size() == 0)
+	auto vbuf = GetVertexBuffer(renderer);
+	FTexture *useSkin;
+
+	double time = frameno + inter;
+
+	// Build the skeleton.
+	// TODO: use frameno, frameno2, and inter to calculate a specific pose.
+	TMap<FString, Node> skeleton;
+    //FMatrix3x3 (vector.h)
 	{
-		return;
+		TMap<FString, Node>::Iterator it(nodes);
+		TMap<FString, Node>::Pair *pair;
+		while (it.NextPair(pair))
+		{
+		}
 	}
 
-	if (!skin)
+	// Build vertex buffer.
+	// Yes, every frame.
+	// Lord help me.
 	{
-		/// FIXME: Group triangles by material. @_@;
-		if (tris[0].mat.isValid())
+		FModelVertex *vertp = vbuf->LockVertexBuffer(vbufSize);
+
+		for (auto s = surfaceList.begin(); s != surfaceList.end(); s++)
 		{
-			skin = TexMan(tris[0].mat);
-		}
-		else
-		{
-			return;
+			for (auto t = s->triangle.begin(); t != s->triangle.end(); t++)
+			{
+				for (unsigned int i = 0; i < 3; i++)
+				{
+					Vertex &v = t->vertex[i];
+					Node &node = *v.node;
+
+                    FVector3 pos(v.pos);
+                    /*
+					FVector3 pos(skeleton[node.name].pos);
+
+					FVector3 off(v.pos.X - pos.X, v.pos.Y - pos.Y, v.pos.Z - pos.Z);
+
+					// TEST
+					if (!node.name.Compare("Head"))
+					{
+						off *= 0.5;
+					}
+
+					pos += off;
+					*/
+
+					vertp->Set(pos.X, pos.Z, pos.Y, v.texCoord.X, v.texCoord.Y);
+					vertp->SetNormal(v.normal.X, v.normal.Z, v.normal.Y);
+					vertp++;
+				}
+			}
 		}
 	}
-	renderer->SetMaterial(skin, false, translation);
-	GetVertexBuffer(renderer)->SetupFrame(renderer, 0, 0, tris.Size() * 3);
-	renderer->DrawArrays(0, tris.Size() * 3);
+	vbuf->UnlockVertexBuffer();
+
+	// Render surfaces.
+	unsigned int start = 0;
+	for (auto s = surfaceList.begin(); s != surfaceList.end(); s++)
+	{
+		useSkin = skin;
+
+		if (!useSkin)
+		{
+			if (s->material.isValid())
+			{
+				useSkin = TexMan(s->material);
+			}
+			else
+			{
+				// invalid texture, nothing to render.
+				start += s->triangle.Size() * 3;
+				continue;
+			}
+		}
+
+		renderer->SetMaterial(useSkin, false, translation);
+		vbuf->SetupFrame(renderer, start, start, s->triangle.Size() * 3);
+		renderer->DrawArrays(0, s->triangle.Size() * 3);
+
+		start += s->triangle.Size() * 3;
+	}
 }
 
 /**
@@ -309,22 +385,16 @@ void FSMDModel::BuildVertexBuffer(FModelRenderer *renderer)
 		return;
 	}
 
+	// Allocate vertex buffer.
 	auto vbuf = renderer->CreateVertexBuffer(false,true);
 	SetVertexBuffer(renderer, vbuf);
 
-	FModelVertex *vertptr = vbuf->LockVertexBuffer(tris.Size() * 3);
-
-	for (unsigned int i = 0; i < tris.Size(); i++)
+	// Calculate total vertex buffer size.
+	vbufSize = 0;
+	for (auto s = surfaceList.begin(); s != surfaceList.end(); s++)
 	{
-		for (unsigned int j = 0; j < 3; j++)
-		{
-			vertptr->Set(tris[i].verts[j].pos.X, tris[i].verts[j].pos.Z, tris[i].verts[j].pos.Y, tris[i].verts[j].tex.X, -tris[i].verts[j].tex.Y);
-			vertptr->SetNormal(tris[i].verts[j].norm.X, tris[i].verts[j].norm.Z, tris[i].verts[j].norm.Y);
-			vertptr++;
-		}
+		vbufSize += s->triangle.Size() * 3;
 	}
-
-	vbuf->UnlockVertexBuffer();
 }
 
 /**
@@ -334,12 +404,11 @@ void FSMDModel::BuildVertexBuffer(FModelRenderer *renderer)
  */
 void FSMDModel::AddSkins(uint8_t* hitlist)
 {
-	/// FIXME: Group triangles by material. @_@;
-	for (unsigned int i = 0; i < tris.Size(); i++)
+	for (auto s = surfaceList.begin(); s != surfaceList.end(); s++)
 	{
-		if (tris[i].mat.isValid())
+		if (s->material.isValid())
 		{
-			hitlist[tris[i].mat.GetIndex()] |= FTextureManager::HIT_Flat;
+			hitlist[s->material.GetIndex()] |= FTextureManager::HIT_Flat;
 		}
 	}
 }

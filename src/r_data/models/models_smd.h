@@ -37,33 +37,46 @@ private:
 
 	struct Node
 	{
-		FString name, parent;
+		FString name;
 		FVector3 pos, rot;
+		Node *parent;
+	};
+
+	struct Weight
+	{
+		Node *node;
+		float weight;
 	};
 
 	struct Vertex
 	{
 		Node *node;
-		FVector3 pos;
-		FVector3 norm;
-		FVector2 tex;
+		FVector3 pos, normal;
+		FVector2 texCoord;
+		TArray<Weight> weight;
+
+		float dist;
 	};
 
 	struct Triangle
 	{
-		FTextureID mat = FNullTextureID();
-		Vertex verts[3];
+		Vertex vertex[3];
 	};
 
-	TArray<Node> nodelist;
-	TArray<Triangle> tris;
+	struct Surface
+	{
+		FTextureID material = FNullTextureID();
+		TArray<Triangle> triangle;
+	};
+
+	TMap<FString, Node> nodes;
+	TArray<Surface> surfaceList;
+	unsigned int vbufSize = 0;
 
 	Node *GetNodeById(TArray<NodeName> nodeindex, int id);
 	template<typename T, size_t L> T ParseVector(FScanner &sc);
 
 public:
-	FSMDModel();
-	~FSMDModel();
 	bool Load(const char* fn, int lumpnum, const char* buffer, int length) override;
 	int FindFrame(const char* name) override;
 	void RenderFrame(FModelRenderer* renderer, FTexture* skin, int frame, int frame2, double inter, int translation=0) override;
