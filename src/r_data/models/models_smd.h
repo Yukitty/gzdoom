@@ -38,7 +38,8 @@ private:
 	struct Node
 	{
 		FString name;
-		FVector3 pos, rot;
+		FVector3 pos;
+		FVector4 rot;
 		Node *parent;
 	};
 

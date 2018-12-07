@@ -43,6 +43,34 @@ template<typename T, size_t L> T FSMDModel::ParseVector(FScanner &sc)
 	return vec;
 }
 
+static const FVector3 rotateVector3(FVector4 quat, FVector3 vec)
+{
+	FVector4 q = quat.Unit();
+
+	FVector3 u(q.X, q.Y, q.Z);
+	double s = q.W;
+
+	return 2 * (u | vec) * u + (s * s - (u | u)) * vec + 2 * s * (u ^ vec);
+}
+
+static FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
+{
+    // Abbreviations for the various angular functions
+    double cy = cos(euler.Z * 0.5);
+    double sy = sin(euler.Z * 0.5);
+    double cp = cos(euler.Y * 0.5);
+    double sp = sin(euler.Y * 0.5);
+    double cr = cos(euler.X * 0.5);
+    double sr = sin(euler.X * 0.5);
+
+    FVector4 q;
+    q.W = cy * cp * cr + sy * sp * sr;
+    q.X = cy * cp * sr - sy * sp * cr;
+    q.Y = sy * cp * sr + cy * sp * cr;
+    q.Z = sy * cp * cr - cy * sp * sr;
+    return q;
+}
+
 /**
  * Load an MD5 model
  *
@@ -95,40 +123,49 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 					parents.Insert(index, sc.Number);
 				}
 
-
  				node.name = name;
 				nodes.Insert(name, node);
 			}
 
 			// Link up parents properly now that all of the bones have been defined.
-			for (unsigned int i = 0, checked = 0; checked < nodeIndex.CountUsed(); i++)
 			{
-				if (nodeIndex.CheckKey(i))
+				TMap<unsigned int, FString>::Iterator it(nodeIndex);
+				TMap<unsigned int, FString>::Pair *pair;
+				while (it.NextPair(pair))
 				{
-					++checked;
-					if (parents.CheckKey(i))
+					if (parents.CheckKey(pair->Key))
 					{
-						nodes[nodeIndex[i]].parent = &nodes[nodeIndex[parents[i]]];
+						nodes[pair->Value].parent = &nodes[nodeIndex[parents[pair->Key]]];
 					}
 					else
 					{
-						nodes[nodeIndex[i]].parent = nullptr;
+						nodes[pair->Value].parent = nullptr;
 					}
 				}
 			}
 		}
 		else if (sc.Compare("skeleton"))
 		{
-			int time = -1;
+			bool read_pose = false, reference_pose = false;
 			FVector3 pos, rot;
 			while (!sc.CheckString("end"))
 			{
 				if (sc.CheckString("time"))
 				{
 					sc.MustGetNumber();
-					time = sc.Number;
+
+					if (reference_pose)
+					{
+						sc.ScriptMessage("Ignoring non reference pose in main sourcemdl file.\n");
+						read_pose = false;
+					}
+					else
+					{
+						reference_pose = true;
+						read_pose = true;
+					}
 				}
-				else if (time == -1)
+				else if (!reference_pose)
 				{
 					sc.ScriptError("Undefined time in skeleton\n");
 				}
@@ -144,10 +181,10 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 					pos = ParseVector<FVector3,3>(sc);
 					rot = ParseVector<FVector3,3>(sc);
 
-					if (time == 0)
+					if (read_pose)
 					{
 						node.pos = pos;
-						node.rot = rot;
+						node.rot = EulerToQuat(rot);
 					}
 				}
 			}
@@ -249,6 +286,26 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 
 				surface->triangle.Push(triangle);
 			}
+
+			// Attach vertexes to the reference pose.
+			{
+				TMap<FString, Node>::Iterator it(nodes);
+				TMap<FString, Node>::Pair *pair;
+				while (it.NextPair(pair))
+				{
+					Node &node = pair->Value;
+					FVector3 pos(node.pos);
+					Node *parent = node.parent;
+					while (parent) {
+						pos = rotateVector3(parent->rot, pos) + parent->pos;
+						parent = parent->parent;
+					}
+
+					/// \todo Set vertex position/offset thing here??
+					if (!node.name.Compare("Body") || !node.name.Compare("Head"))
+						Printf(TEXTCOLOR_RED "%s position: %.02f, %.02f, %.02f\n", node.name.GetChars(), pos.X, pos.Y, pos.Z);
+				}
+			}
 		}
 		else
 		{
@@ -297,12 +354,19 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 	// Build the skeleton.
 	// TODO: use frameno, frameno2, and inter to calculate a specific pose.
 	TMap<FString, Node> skeleton;
-    //FMatrix3x3 (vector.h)
+	//FMatrix3x3 (vector.h)
 	{
 		TMap<FString, Node>::Iterator it(nodes);
 		TMap<FString, Node>::Pair *pair;
 		while (it.NextPair(pair))
 		{
+			Node node(pair->Value);
+			Node *parent = node.parent;
+			while (parent) {
+				node.pos = rotateVector3(parent->rot, node.pos) + parent->pos;
+				parent = parent->parent;
+			}
+			skeleton[pair->Key] = node;
 		}
 	}
 
@@ -321,8 +385,6 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 					Vertex &v = t->vertex[i];
 					Node &node = *v.node;
 
-                    FVector3 pos(v.pos);
-                    /*
 					FVector3 pos(skeleton[node.name].pos);
 
 					FVector3 off(v.pos.X - pos.X, v.pos.Y - pos.Y, v.pos.Z - pos.Z);
@@ -330,11 +392,10 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 					// TEST
 					if (!node.name.Compare("Head"))
 					{
-						off *= 0.5;
+						off *= 0.5 + sin(time / 40.0 * M_PI) * 0.5;
 					}
 
 					pos += off;
-					*/
 
 					vertp->Set(pos.X, pos.Z, pos.Y, v.texCoord.X, v.texCoord.Y);
 					vertp->SetNormal(v.normal.X, v.normal.Z, v.normal.Y);
