@@ -45,8 +45,9 @@ private:
 
 	struct Weight
 	{
-		Node *node;
-		float weight;
+		FString nodeName;
+		float bias;
+		FVector3 pos;
 	};
 
 	struct Vertex
@@ -54,9 +55,7 @@ private:
 		Node *node;
 		FVector3 pos, normal;
 		FVector2 texCoord;
-		TArray<Weight> weight;
-
-		float dist;
+		Weight weight[8];
 	};
 
 	struct Triangle
@@ -76,6 +75,7 @@ private:
 
 	Node *GetNodeById(TArray<NodeName> nodeindex, int id);
 	template<typename T, size_t L> T ParseVector(FScanner &sc);
+	FVector3 CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot);
 
 public:
 	bool Load(const char* fn, int lumpnum, const char* buffer, int length) override;

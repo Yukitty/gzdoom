@@ -43,32 +43,44 @@ template<typename T, size_t L> T FSMDModel::ParseVector(FScanner &sc)
 	return vec;
 }
 
-static const FVector3 rotateVector3(FVector4 quat, FVector3 vec)
+// FIXME: This belongs in another class, not here!
+static const FVector3 RotateVector3(FVector4 quat, FVector3 vec)
 {
 	FVector4 q = quat.Unit();
-
-	FVector3 u(q.X, q.Y, q.Z);
-	double s = q.W;
-
-	return 2 * (u | vec) * u + (s * s - (u | u)) * vec + 2 * s * (u ^ vec);
+	FVector3 u = q.XYZ();
+	return 2 * (u | vec) * u + (pow(q.W, 2) - (u | u)) * vec + 2 * q.W * (u ^ vec);
 }
 
-static FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
+// FIXME: This belongs in another class, not here!
+static const FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
 {
-    // Abbreviations for the various angular functions
-    double cy = cos(euler.Z * 0.5);
-    double sy = sin(euler.Z * 0.5);
-    double cp = cos(euler.Y * 0.5);
-    double sp = sin(euler.Y * 0.5);
-    double cr = cos(euler.X * 0.5);
-    double sr = sin(euler.X * 0.5);
+	// Abbreviations for the various angular functions
+	double cy = cos(euler.Z * 0.5);
+	double sy = sin(euler.Z * 0.5);
+	double cp = cos(euler.Y * 0.5);
+	double sp = sin(euler.Y * 0.5);
+	double cr = cos(euler.X * 0.5);
+	double sr = sin(euler.X * 0.5);
 
-    FVector4 q;
-    q.W = cy * cp * cr + sy * sp * sr;
-    q.X = cy * cp * sr - sy * sp * cr;
-    q.Y = sy * cp * sr + cy * sp * cr;
-    q.Z = sy * cp * cr - cy * sp * sr;
-    return q;
+	FVector4 q;
+	q.W = cy * cp * cr + sy * sp * sr;
+	q.X = cy * cp * sr - sy * sp * cr;
+	q.Y = sy * cp * sr + cy * sp * cr;
+	q.Z = sy * cp * cr - cy * sp * sr;
+	return q;
+}
+
+// FIXME: This belongs in another class, not here!
+static const FVector4 InverseQuat(FVector4 quat)
+{
+	float norm = pow(quat.X, 2) + pow(quat.Y, 2) + pow(quat.Z, 2) + pow(quat.W, 2);
+	return FVector4(-quat.X / norm, -quat.Y / norm, -quat.Z / norm, quat.W / norm);
+}
+
+/// Calculate the offset of a vertex relative to a bone it's attached to by "un-rotating" it.
+FVector3 FSMDModel::CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot)
+{
+	return RotateVector3(InverseQuat(boneRot), pos - bonePos);
 }
 
 /**
@@ -97,6 +109,9 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 	{
 		sc.ScriptError("Unsupported format version %u\n", sc.Number);
 	}
+
+	// Reference pose skeleton calculation.
+	TMap<FString, Node> skeleton;
 
 	while (sc.GetString())
 	{
@@ -188,14 +203,30 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 					}
 				}
 			}
+
+			// Calculate skeleton with full bone positions.
+			skeleton.Clear();
+			{
+				TMap<FString, Node>::Iterator it(nodes);
+				TMap<FString, Node>::Pair *pair;
+				while (it.NextPair(pair))
+				{
+					Node node(pair->Value);
+					Node *parent = node.parent;
+					while (parent) {
+						node.pos = RotateVector3(parent->rot, node.pos) + parent->pos;
+						parent = parent->parent;
+					}
+					skeleton[pair->Key] = node;
+				}
+			}
 		}
 		else if (sc.Compare("triangles"))
 		{
 			FTextureID material;
 			Triangle triangle;
 
-			unsigned int i, j, weightCount;
-			Node *node;
+			unsigned int i, j, weightCount, w;
 			float totalWeight;
 
 			surfaceList.Clear();
@@ -235,34 +266,72 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 					// Flip the UV because Doom textures.
 					v.texCoord.Y = 1.0 - v.texCoord.Y;
 
-					/// \todo Fully process and store weights.
-					if (sc.CheckNumber())
+					// Process bone weights
+					if (!sc.CheckNumber())
 					{
-						if (sc.Crossed)
-						{
-							sc.UnGet();
-							continue;
-						}
-
+						weightCount = 0;
+					}
+					else if (sc.Crossed)
+					{
+						sc.UnGet();
+						weightCount = 0;
+					}
+					else
+					{
 						weightCount = sc.Number;
-						totalWeight = 0.0f;
-						for (j = 0; j < weightCount; j++)
-						{
-							sc.MustGetNumber();
-							if (!nodeIndex.CheckKey(sc.Number))
-							{
-								sc.ScriptError("Reference to undefined node id %i\n", sc.Number);
-							}
-							node = &nodes[nodeIndex[sc.Number]];
+					}
 
-							// HACK: If node weights add up to 100% or more, change root bone.
-							sc.MustGetFloat();
-							totalWeight += sc.Float;
-							if (totalWeight > 0.9999f)
-							{
-								v.node = node;
-							}
+					if (weightCount > 8)
+					{
+						sc.ScriptError("Too many weights on vertex.");
+					}
+
+					totalWeight = 0.0f;
+					w = 0;
+					while (w < weightCount)
+					{
+						Weight &weight = v.weight[w++];
+
+						sc.MustGetNumber();
+						if (!nodeIndex.CheckKey(sc.Number))
+						{
+							sc.ScriptError("Reference to undefined node id %i\n", sc.Number);
 						}
+						weight.nodeName = nodeIndex[sc.Number];
+
+						sc.MustGetFloat();
+						weight.bias = sc.Float;
+						totalWeight += sc.Float;
+
+						// HACK: If node weights add up to 100% or more, change root bone.
+						if (totalWeight > 0.9999f)
+						{
+							v.node = &nodes[weight.nodeName];
+						}
+
+						if (totalWeight > 1.001f)
+						{
+							sc.ScriptMessage("Too much weight on vertex.");
+						}
+
+						// Calculate vertex offset based on reference skeleton.
+						weight.pos = CalcVertOff(v.pos, skeleton[weight.nodeName].pos, skeleton[weight.nodeName].rot);
+					}
+
+					if (totalWeight < 1.0f && w < 8)
+					{
+						Weight &weight = v.weight[w++];
+						weight.nodeName = v.node->name;
+						weight.bias = 1.0f - totalWeight;
+						weight.pos = CalcVertOff(v.pos, skeleton[weight.nodeName].pos, skeleton[weight.nodeName].rot);
+					}
+
+					while (w < 8)
+					{
+						Weight &weight = v.weight[w++];
+						weight.nodeName = "";
+						weight.bias = 0.0f;
+						weight.pos = FVector3(0, 0, 0);
 					}
 				}
 
@@ -285,26 +354,6 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 				}
 
 				surface->triangle.Push(triangle);
-			}
-
-			// Attach vertexes to the reference pose.
-			{
-				TMap<FString, Node>::Iterator it(nodes);
-				TMap<FString, Node>::Pair *pair;
-				while (it.NextPair(pair))
-				{
-					Node &node = pair->Value;
-					FVector3 pos(node.pos);
-					Node *parent = node.parent;
-					while (parent) {
-						pos = rotateVector3(parent->rot, pos) + parent->pos;
-						parent = parent->parent;
-					}
-
-					/// \todo Set vertex position/offset thing here??
-					if (!node.name.Compare("Body") || !node.name.Compare("Head"))
-						Printf(TEXTCOLOR_RED "%s position: %.02f, %.02f, %.02f\n", node.name.GetChars(), pos.X, pos.Y, pos.Z);
-				}
 			}
 		}
 		else
@@ -339,9 +388,9 @@ int FSMDModel::FindFrame(const char* name)
  *
  * @param renderer The model renderer
  * @param skin The loaded skin for the surface
- * @param frameno Unused
- * @param frameno2 Unused
- * @param inter Unused
+ * @param frameno Current animation keyframe
+ * @param frameno2 Animation blend keyframe
+ * @param inter Bias towards frameno2
  * @param translation The translation for the skin
  */
 void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int frameno, int frameno2, double inter, int translation)
@@ -350,11 +399,12 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 	FTexture *useSkin;
 
 	double time = frameno + inter;
+	nodes["Head"].rot = EulerToQuat(FVector3(time / 40.0 * M_PI * 2, 0, 0));
 
 	// Build the skeleton.
 	// TODO: use frameno, frameno2, and inter to calculate a specific pose.
 	TMap<FString, Node> skeleton;
-	//FMatrix3x3 (vector.h)
+	skeleton.Clear();
 	{
 		TMap<FString, Node>::Iterator it(nodes);
 		TMap<FString, Node>::Pair *pair;
@@ -363,12 +413,13 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 			Node node(pair->Value);
 			Node *parent = node.parent;
 			while (parent) {
-				node.pos = rotateVector3(parent->rot, node.pos) + parent->pos;
+				node.pos = RotateVector3(parent->rot, node.pos) + parent->pos;
 				parent = parent->parent;
 			}
 			skeleton[pair->Key] = node;
 		}
 	}
+
 
 	// Build vertex buffer.
 	// Yes, every frame.
@@ -383,19 +434,21 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 				for (unsigned int i = 0; i < 3; i++)
 				{
 					Vertex &v = t->vertex[i];
-					Node &node = *v.node;
-
-					FVector3 pos(skeleton[node.name].pos);
-
-					FVector3 off(v.pos.X - pos.X, v.pos.Y - pos.Y, v.pos.Z - pos.Z);
-
-					// TEST
-					if (!node.name.Compare("Head"))
+					FVector3 pos(0, 0, 0);
+					for (unsigned int w = 0; w < 8; w++)
 					{
-						off *= 0.5 + sin(time / 40.0 * M_PI) * 0.5;
-					}
+						Weight &weight = v.weight[w];
+						if (weight.bias <= 0.0f)
+						{
+							continue;
+						}
 
-					pos += off;
+						Node *node = skeleton.CheckKey(weight.nodeName);
+						if (node)
+						{
+							pos += (node->pos + RotateVector3(node->rot, weight.pos)) * weight.bias;
+						}
+					}
 
 					vertp->Set(pos.X, pos.Z, pos.Y, v.texCoord.X, v.texCoord.Y);
 					vertp->SetNormal(v.normal.X, v.normal.Z, v.normal.Y);
