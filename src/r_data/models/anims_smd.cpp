@@ -205,7 +205,16 @@ void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, double inter)
 	Node *node = frame[frameno].node;
 	for (unsigned int i = 0; i < nodeNames.Size(); i++)
 	{
-		model.nodes[nodeNames[i]].pos = node[i].pos;
-		model.nodes[nodeNames[i]].rot = node[i].rot;
+		if (inter >= 1.0)
+		{
+			model.nodes[nodeNames[i]].pos = node[i].pos;
+			model.nodes[nodeNames[i]].rot = node[i].rot;
+		}
+		else
+		{
+			FSMDModel::Node &model_node = model.nodes[nodeNames[i]];
+			model_node.pos = node[i].pos * inter + model_node.pos * (1.0 - inter);
+			model_node.rot = node[i].rot;
+		}
 	}
 }

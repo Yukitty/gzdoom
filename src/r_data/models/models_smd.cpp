@@ -449,10 +449,20 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 	// Find animation + frame from global frameno.
 	for (auto a = animList.begin(); a != animList.end(); a++)
 	{
-		if ((unsigned)frameno >= a->start && (unsigned)frameno < a->start + a->frames)
+		if ((unsigned)frameno >= a->start && (unsigned)(frameno - a->start) < a->frames)
 		{
 			// Pose the model by animation.
 			a->data.SetPose(*this, frameno - a->start, 1.0);
+			break;
+		}
+	}
+
+	// Do it again for frameno2, but apply interpolation this time.
+	for (auto a = animList.begin(); a != animList.end(); a++)
+	{
+		if ((unsigned)frameno2 >= a->start && (unsigned)(frameno2 - a->start) < a->frames)
+		{
+			a->data.SetPose(*this, frameno2 - a->start, inter);
 			break;
 		}
 	}
