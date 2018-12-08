@@ -49,7 +49,7 @@ private:
 public:
 	~FSMDAnim();
 	unsigned int Load(const char* fn, int lumpnum, const char* buffer, int length);
-	void SetPose(FSMDModel &model, unsigned int frameno, double inter);
+	void SetPose(FSMDModel & model, unsigned int frameno, float inter);
 };
 
 #endif

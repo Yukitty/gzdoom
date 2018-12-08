@@ -462,7 +462,7 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 	{
 		if ((unsigned)frameno2 >= a->start && (unsigned)(frameno2 - a->start) < a->frames)
 		{
-			a->data.SetPose(*this, frameno2 - a->start, inter);
+			a->data.SetPose(*this, frameno2 - a->start, (float)inter);
 			break;
 		}
 	}

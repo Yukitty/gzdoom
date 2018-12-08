@@ -89,7 +89,7 @@ static FVector4 LerpQuat(FVector4 from, FVector4 to, float inter)
 static FVector4 SlerpQuat(FVector4 from, FVector4 to, float inter)
 {
 	FVector4 q3;
-	double fromToDot = from | to;
+	float fromToDot = from | to;
 
 	if (fromToDot < 0) {
 		fromToDot = -fromToDot;
@@ -100,8 +100,8 @@ static FVector4 SlerpQuat(FVector4 from, FVector4 to, float inter)
 	}
 
 	if (fromToDot < 0.95) {
-		double angle = acos(fromToDot);
-		return (from * sin(angle * (1.0 - inter)) + q3 * sin(angle * inter)) * (1 / sin(angle));
+		float angle = acos(fromToDot);
+		return (from * sin(angle * (1.0f - inter)) + q3 * sin(angle * inter)) * (1.0f / sin(angle));
 	}
 	return LerpQuat(from, q3, inter);
 }
@@ -228,7 +228,7 @@ unsigned int FSMDAnim::Load(const char* fn, int lumpnum, const char* buffer, int
  * @param frameno Local animation frame number to set the pose to
  * @param inter Pose interpolation bias to apply (1.0 to fully overwrite the existing pose)
  */
-void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, double inter)
+void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, float inter)
 {
 	if (frameno >= frame.Size())
 	{
@@ -247,7 +247,7 @@ void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, double inter)
 		else
 		{
 			FSMDModel::Node &model_node = model.nodes[nodeNames[i]];
-			model_node.pos = node[i].pos * inter + model_node.pos * (1.0 - inter);
+			model_node.pos = node[i].pos * inter + model_node.pos * (1.0f - inter);
 			model_node.rot = SlerpQuat(model_node.rot, node[i].rot, inter);
 		}
 	}
