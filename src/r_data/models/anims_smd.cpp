@@ -54,7 +54,7 @@ template<typename T, size_t L> T FSMDAnim::ParseVector(FScanner &sc)
 }
 
 // FIXME: This belongs in another class, not here!
-static const FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
+static FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
 {
 	// Abbreviations for the various angular functions
 	double cy = cos(euler.Z * 0.5);
@@ -70,6 +70,40 @@ static const FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X
 	q.Y = (float)(sy * cp * sr + cy * sp * cr);
 	q.Z = (float)(sy * cp * cr - cy * sp * sr);
 	return q;
+}
+
+// FIXME: This belongs in another class, not here!
+static FVector4 LerpQuat(FVector4 from, FVector4 to, float inter)
+{
+	float invInter = 1.0f - inter;
+	FVector4 ret(
+		invInter * from.X + inter * to.X,
+		invInter * from.Y + inter * to.Y,
+		invInter * from.Z + inter * to.Z,
+		invInter * from.W + inter * to.W
+	);
+	return ret.Unit();
+}
+
+// FIXME: This belongs in another class, not here!
+static FVector4 SlerpQuat(FVector4 from, FVector4 to, float inter)
+{
+	FVector4 q3;
+	double fromToDot = from | to;
+
+	if (fromToDot < 0) {
+		fromToDot = -fromToDot;
+		q3 = -to;
+	}
+	else {
+		q3 = to;
+	}
+
+	if (fromToDot < 0.95) {
+		double angle = acos(fromToDot);
+		return (from * sin(angle * (1.0 - inter)) + q3 * sin(angle * inter)) * (1 / sin(angle));
+	}
+	return LerpQuat(from, q3, inter);
 }
 
 /**
@@ -214,7 +248,7 @@ void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, double inter)
 		{
 			FSMDModel::Node &model_node = model.nodes[nodeNames[i]];
 			model_node.pos = node[i].pos * inter + model_node.pos * (1.0 - inter);
-			model_node.rot = node[i].rot;
+			model_node.rot = SlerpQuat(model_node.rot, node[i].rot, inter);
 		}
 	}
 }
