@@ -87,10 +87,10 @@ FVector3 FSMDModel::CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot
 static FVector4 CombineQuat(FVector4 a, FVector4 b)
 {
 	return FVector4(
-		a.W * b.X + a.X * b.W + a.Y * b.Z - a.Z * b.Y, // x
-		a.W * b.Z - a.X * b.Z + a.Y * b.W + a.Z * b.X, // y
-		a.W * b.Z + a.X * b.Y - a.Y * b.X + a.Z * b.W, // z
-		a.W * b.W - a.X * b.X - a.Y * b.Y - a.Z * b.Z  // w
+		a.W * b.X + a.X * b.W + a.Y * b.Z - a.Z * b.Y, // X
+		a.W * b.Y + a.Y * b.W + a.Z * b.X - a.X * b.Z, // Y
+		a.W * b.Z + a.Z * b.W + a.X * b.Y - a.Y * b.X, // Z
+		a.W * b.W - a.X * b.X - a.Y * b.Y - a.Z * b.Z // W
 	);
 }
 
