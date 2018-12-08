@@ -63,10 +63,10 @@ static FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
 	double sr = sin(euler.X * 0.5);
 
 	FVector4 q;
-	q.W = cy * cp * cr + sy * sp * sr;
-	q.X = cy * cp * sr - sy * sp * cr;
-	q.Y = sy * cp * sr + cy * sp * cr;
-	q.Z = sy * cp * cr - cy * sp * sr;
+	q.W = (float)(cy * cp * cr + sy * sp * sr);
+	q.X = (float)(cy * cp * sr - sy * sp * cr);
+	q.Y = (float)(sy * cp * sr + cy * sp * cr);
+	q.Z = (float)(sy * cp * cr - cy * sp * sr);
 	return q;
 }
 
@@ -150,7 +150,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 	{
 		if (sc.Compare("nodes"))
 		{
-			int index, parent;
+			int index;
 			FString name;
 			Node node;
 
@@ -245,7 +245,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 			FTextureID material;
 			Triangle triangle;
 
-			unsigned int i, j, weightCount, w;
+			unsigned int i, weightCount, w;
 			float totalWeight;
 
 			surfaceList.Clear();
@@ -283,7 +283,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 					v.texCoord = ParseVector<FVector2,2>(sc);
 
 					// Flip the UV because Doom textures.
-					v.texCoord.Y = 1.0 - v.texCoord.Y;
+					v.texCoord.Y = 1.0f - v.texCoord.Y;
 
 					// Process bone weights
 					if (!sc.CheckNumber())
@@ -319,8 +319,8 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 						weight.nodeName = nodeIndex[sc.Number];
 
 						sc.MustGetFloat();
-						weight.bias = sc.Float;
-						totalWeight += sc.Float;
+						weight.bias = (float)sc.Float;
+						totalWeight += (float)sc.Float;
 
 						// HACK: If node weights add up to 100% or more, change root bone.
 						if (totalWeight > 0.9999f)

@@ -65,10 +65,10 @@ static const FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X
 	double sr = sin(euler.X * 0.5);
 
 	FVector4 q;
-	q.W = cy * cp * cr + sy * sp * sr;
-	q.X = cy * cp * sr - sy * sp * cr;
-	q.Y = sy * cp * sr + cy * sp * cr;
-	q.Z = sy * cp * cr - cy * sp * sr;
+	q.W = (float)(cy * cp * cr + sy * sp * sr);
+	q.X = (float)(cy * cp * sr - sy * sp * cr);
+	q.Y = (float)(sy * cp * sr + cy * sp * cr);
+	q.Z = (float)(sy * cp * cr - cy * sp * sr);
 	return q;
 }
 
@@ -143,7 +143,7 @@ unsigned int FSMDAnim::Load(const char* fn, int lumpnum, const char* buffer, int
 					// Initialize new frame data to previous frame data, if available.
 					if (lastFrame.node)
 					{
-						memcpy(thisFrame.node, lastFrame.node, sizeof(Node[nodeNames.Size()]));
+						memcpy(thisFrame.node, lastFrame.node, sizeof(Node) * nodeNames.Size());
 					}
 				}
 				else if (!thisFrame.node)
