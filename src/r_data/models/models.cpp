@@ -605,24 +605,71 @@ static void ParseModelDefLump(int Lump)
 				}
 				else if (sc.Compare("modelanim"))
 				{
+					FModel *model = nullptr;
+
 					// model index
 					sc.MustGetNumber();
 					index = sc.Number;
 					if (index < 0 || index >= MAX_MODELS_PER_FRAME)
 					{
-						sc.ScriptError("ModelAnim out of bounds in %s", smf.type->TypeName.GetChars());
+						sc.ScriptError("Model index out of bounds in %s\n", smf.type->TypeName.GetChars());
+					}
+					else if (smf.modelIDs[index] == -1)
+					{
+						// Not a fatal error! Parse the rest of the line. (See !model below.)
+						sc.ScriptMessage("Model index %u not defined for %s\n", index, smf.type->TypeName.GetChars());
+					}
+					else
+					{
+						model = Models[smf.modelIDs[index]];
 					}
 
-					sc.MustGetString();
-					//sc.String; // anim name
+					FString fileName, animName;
 
+					// Animation file name
 					sc.MustGetString();
 					FixPathSeperator(sc.String);
-					if (smf.modelIDs[index] == -1)
+					fileName = sc.String;
+
+					// Optional animation name.
+					if (sc.GetString())
 					{
-						Printf("model %u not defined in %s\n", index, path.GetChars());
+						if (sc.Crossed)
+						{
+							sc.UnGet();
+						}
+						else
+						{
+							animName = sc.String;
+						}
 					}
-					/// TODO: Load this and do something with it.
+
+					// Model index was invalid, so just continue to the next line.
+					if (!model)
+					{
+						continue;
+					}
+
+					if (!model->CanLoadAnim())
+					{
+						sc.ScriptMessage("Model type doesn't load external animation files in %s\n", smf.type->TypeName.GetChars());
+						continue;
+					}
+
+					{
+						int lump;
+						{
+							FString fullname;
+							fullname.Format("%s%s", path.GetChars(), fileName.GetChars());
+							lump = Wads.CheckNumForFullName(fullname);
+							if (lump<0)
+							{
+								sc.ScriptMessage("ModelAnim: '%s' not found\n", fullname.GetChars());
+								continue;
+							}
+						}
+						model->LoadAnim(path.GetChars(), animName.GetChars(), lump);
+					}
 				}
 				else if (sc.Compare("scale"))
 				{

@@ -20,11 +20,11 @@
 //--------------------------------------------------------------------------
 //
 
-#ifndef __GL_MODELS_SMD_H__
-#define __GL_MODELS_SMD_H__
+#ifndef __R_MODELS_SMD_H__
+#define __R_MODELS_SMD_H__
 
 #include "models.h"
-#include <map>
+#include "r_data/models/anims_smd.h"
 
 class FSMDModel : public FModel
 {
@@ -69,7 +69,13 @@ private:
 		TArray<Triangle> triangle;
 	};
 
-	TMap<FString, Node> nodes;
+	struct Animation
+	{
+		unsigned int start, frames;
+		FSMDAnim data;
+	};
+
+	TMap<FName, Node> nodes;
 	TArray<Surface> surfaceList;
 	unsigned int vbufSize = 0;
 
@@ -77,12 +83,23 @@ private:
 	template<typename T, size_t L> T ParseVector(FScanner &sc);
 	FVector3 CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot);
 
+	TMap<FName, unsigned int> animNameIndex; // fast name -> animList index
+	TArray<Animation> animList; // depends on strict ordering for consistent frameno.
+	unsigned int frameCount = 0; // to make tacking new animations onto the end easier.
+
+	TMap<FName, Node> FlattenSkeleton();
+
 public:
 	bool Load(const char* fn, int lumpnum, const char* buffer, int length) override;
 	int FindFrame(const char* name) override;
 	void RenderFrame(FModelRenderer* renderer, FTexture* skin, int frame, int frame2, double inter, int translation=0) override;
 	void BuildVertexBuffer(FModelRenderer* renderer) override;
 	void AddSkins(uint8_t* hitlist) override;
+
+	bool CanLoadAnim() override { return true; };
+	void LoadAnim(const char *path, const char *name, int lumpnum) override;
+
+	friend class FSMDAnim;
 };
 
 #endif

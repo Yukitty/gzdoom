@@ -1,4 +1,4 @@
-// 
+//
 //---------------------------------------------------------------------------
 //
 // Copyright(C) 2005-2016 Christoph Oelckers
@@ -141,6 +141,9 @@ public:
 	virtual void AddSkins(uint8_t *hitlist) = 0;
 	virtual float getAspectFactor(FLevelLocals *) { return 1.f; }
 
+	virtual bool CanLoadAnim() { return false; };
+	virtual void LoadAnim(const char *path, const char *name, int lumpnum) {};
+
 	void SetVertexBuffer(FModelRenderer *renderer, IModelVertexBuffer *buffer) { mVBuf[renderer->GetType()] = buffer; }
 	IModelVertexBuffer *GetVertexBuffer(FModelRenderer *renderer) const { return mVBuf[renderer->GetType()]; }
 	void DestroyVertexBuffer();
@@ -246,8 +249,8 @@ protected:
 	DMDLoD			lods[MAX_LODS];
 
 public:
-	FDMDModel() 
-	{ 
+	FDMDModel()
+	{
 		mLumpNum = -1;
 		frames = NULL;
 		skins = NULL;
@@ -358,17 +361,17 @@ public:
 struct FVoxelVertexHash
 {
 	// Returns the hash value for a key.
-	hash_t Hash(const FModelVertex &key) 
-	{ 
-		int ix = xs_RoundToInt(key.x);		
-		int iy = xs_RoundToInt(key.y);		
-		int iz = xs_RoundToInt(key.z);		
+	hash_t Hash(const FModelVertex &key)
+	{
+		int ix = xs_RoundToInt(key.x);
+		int iy = xs_RoundToInt(key.y);
+		int iz = xs_RoundToInt(key.z);
 		return (hash_t)(ix + (iy<<9) + (iz<<18));
 	}
 
 	// Compares two keys, returning zero if they are the same.
-	int Compare(const FModelVertex &left, const FModelVertex &right) 
-	{ 
+	int Compare(const FModelVertex &left, const FModelVertex &right)
+	{
 		return left.x != right.x || left.y != right.y || left.z != right.z || left.u != right.u || left.v != right.v;
 	}
 };
@@ -393,7 +396,7 @@ protected:
 	unsigned int mNumIndices;
 	TArray<FModelVertex> mVertices;
 	TArray<unsigned int> mIndices;
-	
+
 	void MakeSlabPolys(int x, int y, kvxslab_t *voxptr, FVoxelMap &check);
 	void AddFace(int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, int x4, int y4, int z4, uint8_t color, FVoxelMap &check);
 	unsigned int AddVertex(FModelVertex &vert, FVoxelMap &check);

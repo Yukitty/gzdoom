@@ -44,7 +44,7 @@ template<typename T, size_t L> T FSMDModel::ParseVector(FScanner &sc)
 }
 
 // FIXME: This belongs in another class, not here!
-static const FVector3 RotateVector3(FVector4 quat, FVector3 vec)
+static FVector3 RotateVector3(FVector4 quat, FVector3 vec)
 {
 	FVector4 q = quat.Unit();
 	FVector3 u = q.XYZ();
@@ -52,7 +52,7 @@ static const FVector3 RotateVector3(FVector4 quat, FVector3 vec)
 }
 
 // FIXME: This belongs in another class, not here!
-static const FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
+static FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
 {
 	// Abbreviations for the various angular functions
 	double cy = cos(euler.Z * 0.5);
@@ -71,7 +71,7 @@ static const FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X
 }
 
 // FIXME: This belongs in another class, not here!
-static const FVector4 InverseQuat(FVector4 quat)
+static FVector4 InverseQuat(FVector4 quat)
 {
 	float norm = pow(quat.X, 2) + pow(quat.Y, 2) + pow(quat.Z, 2) + pow(quat.W, 2);
 	return FVector4(-quat.X / norm, -quat.Y / norm, -quat.Z / norm, quat.W / norm);
@@ -83,8 +83,41 @@ FVector3 FSMDModel::CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot
 	return RotateVector3(InverseQuat(boneRot), pos - bonePos);
 }
 
+// FIXME: This belongs in another class, not here!
+static FVector4 CombineQuat(FVector4 a, FVector4 b)
+{
+	return FVector4(
+		a.W * b.X + a.X * b.W + a.Y * b.Z - a.Z * b.Y, // x
+		a.W * b.Z - a.X * b.Z + a.Y * b.W + a.Z * b.X, // y
+		a.W * b.Z + a.X * b.Y - a.Y * b.X + a.Z * b.W, // z
+		a.W * b.W - a.X * b.X - a.Y * b.Y - a.Z * b.Z  // w
+	);
+}
+
+TMap<FName, FSMDModel::Node> FSMDModel::FlattenSkeleton()
+{
+	TMap<FName, Node> skeleton;
+	skeleton.Clear();
+	{
+		TMap<FName, Node>::Iterator it(nodes);
+		TMap<FName, Node>::Pair *pair;
+		while (it.NextPair(pair))
+		{
+			Node node(pair->Value);
+			Node *parent = node.parent;
+			while (parent) {
+				node.pos = RotateVector3(parent->rot, node.pos) + parent->pos;
+				node.rot = CombineQuat(parent->rot, node.rot);
+				parent = parent->parent;
+			}
+			skeleton[pair->Key] = node;
+		}
+	}
+	return skeleton;
+}
+
 /**
- * Load an MD5 model
+ * Load a sourcemdl model
  *
  * @param fn The path to the model file
  * @param lumpnum The lump index in the wad collection
@@ -111,7 +144,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 	}
 
 	// Reference pose skeleton calculation.
-	TMap<FString, Node> skeleton;
+	TMap<FName, Node> skeleton;
 
 	while (sc.GetString())
 	{
@@ -205,21 +238,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 			}
 
 			// Calculate skeleton with full bone positions.
-			skeleton.Clear();
-			{
-				TMap<FString, Node>::Iterator it(nodes);
-				TMap<FString, Node>::Pair *pair;
-				while (it.NextPair(pair))
-				{
-					Node node(pair->Value);
-					Node *parent = node.parent;
-					while (parent) {
-						node.pos = RotateVector3(parent->rot, node.pos) + parent->pos;
-						parent = parent->parent;
-					}
-					skeleton[pair->Key] = node;
-				}
-			}
+			skeleton = FlattenSkeleton();
 		}
 		else if (sc.Compare("triangles"))
 		{
@@ -373,6 +392,34 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 }
 
 /**
+ * Load a sourcemdl-compatible animation
+ *
+ * @param path The path to the animation file
+ * @param name The friendly name of the animation or an empty string
+ * @param lumpnum The lump index in the wad collection
+ */
+void FSMDModel::LoadAnim(const char *path, const char *name, int lumpnum)
+{
+	// Assume .smd animation file.
+
+	int len = Wads.LumpLength(lumpnum);
+	FMemLump lumpd = Wads.ReadLump(lumpnum);
+	char * buffer = (char*)lumpd.GetMem();
+
+	unsigned int index = animList.Reserve(1);
+	Animation &anim = animList[index];
+	anim.start = frameCount;
+	anim.frames = anim.data.Load(path, lumpnum, buffer, len);
+	frameCount += anim.frames;
+
+	if (FString(name).Len() > 0)
+	{
+		animNameIndex[name] = index;
+		Printf("Loaded %u frames for animation %s\n", anim.frames, name);
+	}
+}
+
+/**
  * Find the index of the frame with the given name
  *
  * @param name The name of the frame
@@ -380,6 +427,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
  */
 int FSMDModel::FindFrame(const char* name)
 {
+	/// \todo Search and return by anim names + frame numbers
 	return 0;
 }
 
@@ -390,7 +438,7 @@ int FSMDModel::FindFrame(const char* name)
  * @param skin The loaded skin for the surface
  * @param frameno Current animation keyframe
  * @param frameno2 Animation blend keyframe
- * @param inter Bias towards frameno2
+ * @param inter Interpolation bias towards frameno2
  * @param translation The translation for the skin
  */
 void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int frameno, int frameno2, double inter, int translation)
@@ -398,28 +446,19 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 	auto vbuf = GetVertexBuffer(renderer);
 	FTexture *useSkin;
 
-	double time = frameno + inter;
-	nodes["Head"].rot = EulerToQuat(FVector3(time / 40.0 * M_PI * 2, 0, 0));
-
-	// Build the skeleton.
-	// TODO: use frameno, frameno2, and inter to calculate a specific pose.
-	TMap<FString, Node> skeleton;
-	skeleton.Clear();
+	// Find animation + frame from global frameno.
+	for (auto a = animList.begin(); a != animList.end(); a++)
 	{
-		TMap<FString, Node>::Iterator it(nodes);
-		TMap<FString, Node>::Pair *pair;
-		while (it.NextPair(pair))
+		if ((unsigned)frameno >= a->start && (unsigned)frameno < a->start + a->frames)
 		{
-			Node node(pair->Value);
-			Node *parent = node.parent;
-			while (parent) {
-				node.pos = RotateVector3(parent->rot, node.pos) + parent->pos;
-				parent = parent->parent;
-			}
-			skeleton[pair->Key] = node;
+			// Pose the model by animation.
+			a->data.SetPose(*this, frameno - a->start, 1.0);
+			break;
 		}
 	}
 
+	// Build the skeleton.
+	TMap<FName, Node> skeleton = FlattenSkeleton();
 
 	// Build vertex buffer.
 	// Yes, every frame.
