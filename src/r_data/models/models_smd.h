@@ -43,6 +43,14 @@ private:
 		Node *parent;
 	};
 
+	struct RNode
+	{
+		FVector3 pos;
+		FVector4 rot;
+		FVector3 xyz;
+		float s, dot;
+	};
+
 	struct Weight
 	{
 		FString nodeName;
@@ -81,13 +89,13 @@ private:
 
 	Node *GetNodeById(TArray<NodeName> nodeindex, int id);
 	template<typename T, size_t L> T ParseVector(FScanner &sc);
-	FVector3 CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot);
+	FVector3 CalcVertOff(FVector3 pos, RNode bone);
 
 	TMap<FName, unsigned int> animNameIndex; // fast name -> animList index
 	TArray<Animation> animList; // depends on strict ordering for consistent frameno.
 	unsigned int frameCount = 0; // to make tacking new animations onto the end easier.
 
-	TMap<FName, Node> FlattenSkeleton();
+	TMap<FName, RNode> *FlattenSkeleton();
 
 public:
 	bool Load(const char* fn, int lumpnum, const char* buffer, int length) override;

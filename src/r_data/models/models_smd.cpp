@@ -44,12 +44,15 @@ template<typename T, size_t L> T FSMDModel::ParseVector(FScanner &sc)
 }
 
 // FIXME: This belongs in another class, not here!
-static FVector3 RotateVector3(FVector4 quat, FVector3 vec)
+static inline FVector3 RotateVector3(FVector4 quat, FVector3 vec)
 {
-	FVector4 q = quat.Unit();
-	FVector3 u = q.XYZ();
-	return 2 * (u | vec) * u + (pow(q.W, 2) - (u | u)) * vec + 2 * q.W * (u ^ vec);
+	quat = quat.Unit();
+	FVector3 u = quat.XYZ();
+	return 2 * (u | vec) * u + (pow(quat.W, 2) - (u | u)) * vec + 2 * quat.W * (u ^ vec);
 }
+
+// FIXME: help
+#define PreCalcRotateVector3(vec, xyz, s, dot) (2 * (xyz | vec) * xyz + dot * vec + s * (xyz ^ vec))
 
 // FIXME: This belongs in another class, not here!
 static FVector4 EulerToQuat(FVector3 euler) // yaw (Z), pitch (Y), roll (X)
@@ -78,9 +81,9 @@ static FVector4 InverseQuat(FVector4 quat)
 }
 
 /// Calculate the offset of a vertex relative to a bone it's attached to by "un-rotating" it.
-FVector3 FSMDModel::CalcVertOff(FVector3 pos, FVector3 bonePos, FVector4 boneRot)
+FVector3 FSMDModel::CalcVertOff(FVector3 pos, RNode bone)
 {
-	return RotateVector3(InverseQuat(boneRot), pos - bonePos);
+	return RotateVector3(InverseQuat(bone.rot), pos - bone.pos);
 }
 
 // FIXME: This belongs in another class, not here!
@@ -94,26 +97,28 @@ static FVector4 CombineQuat(FVector4 a, FVector4 b)
 	);
 }
 
-TMap<FName, FSMDModel::Node> FSMDModel::FlattenSkeleton()
+TMap<FName, FSMDModel::RNode> *FSMDModel::FlattenSkeleton()
 {
-	TMap<FName, Node> skeleton;
-	skeleton.Clear();
+	static TMap<FName, RNode> skeleton;
 	{
 		TMap<FName, Node>::Iterator it(nodes);
 		TMap<FName, Node>::Pair *pair;
 		while (it.NextPair(pair))
 		{
-			Node node(pair->Value);
-			Node *parent = node.parent;
+			RNode node;
+			FVector3 pos = pair->Value.pos;
+			FVector4 rot = pair->Value.rot;
+			Node *parent = pair->Value.parent;
 			while (parent) {
-				node.pos = RotateVector3(parent->rot, node.pos) + parent->pos;
-				node.rot = CombineQuat(parent->rot, node.rot);
+				pos = RotateVector3(parent->rot, pos) + parent->pos;
+				rot = CombineQuat(parent->rot, rot);
 				parent = parent->parent;
 			}
-			skeleton[pair->Key] = node;
+			rot.Unit();
+			skeleton[pair->Key] = RNode{pos, rot, rot.XYZ(), 2 * rot.W, (float)(pow(rot.W, 2) - (rot.XYZ() | rot.XYZ()))};
 		}
 	}
-	return skeleton;
+	return &skeleton;
 }
 
 /**
@@ -144,7 +149,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 	}
 
 	// Reference pose skeleton calculation.
-	TMap<FName, Node> skeleton;
+	TMap<FName, RNode> *skeleton;
 
 	while (sc.GetString())
 	{
@@ -334,7 +339,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 						}
 
 						// Calculate vertex offset based on reference skeleton.
-						weight.pos = CalcVertOff(v.pos, skeleton[weight.nodeName].pos, skeleton[weight.nodeName].rot);
+						weight.pos = CalcVertOff(v.pos, (*skeleton)[weight.nodeName]);
 					}
 
 					if (totalWeight < 1.0f && w < 8)
@@ -342,7 +347,7 @@ bool FSMDModel::Load(const char* fn, int lumpnum, const char* buffer, int length
 						Weight &weight = v.weight[w++];
 						weight.nodeName = v.node->name;
 						weight.bias = 1.0f - totalWeight;
-						weight.pos = CalcVertOff(v.pos, skeleton[weight.nodeName].pos, skeleton[weight.nodeName].rot);
+						weight.pos = CalcVertOff(v.pos, (*skeleton)[weight.nodeName]);
 					}
 
 					while (w < 8)
@@ -458,23 +463,27 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 	}
 
 	// Do it again for frameno2, but apply interpolation this time.
-	for (auto a = animList.begin(); a != animList.end(); a++)
+	if (frameno2 != frameno && inter > 0.0)
 	{
-		if ((unsigned)frameno2 >= a->start && (unsigned)(frameno2 - a->start) < a->frames)
+		for (auto a = animList.begin(); a != animList.end(); a++)
 		{
-			a->data.SetPose(*this, frameno2 - a->start, (float)inter);
-			break;
+			if ((unsigned)frameno2 >= a->start && (unsigned)(frameno2 - a->start) < a->frames)
+			{
+				a->data.SetPose(*this, frameno2 - a->start, (float)inter);
+				break;
+			}
 		}
 	}
 
 	// Build the skeleton.
-	TMap<FName, Node> skeleton = FlattenSkeleton();
+	TMap<FName, RNode> *skeleton = FlattenSkeleton();
 
 	// Build vertex buffer.
 	// Yes, every frame.
 	// Lord help me.
 	{
 		FModelVertex *vertp = vbuf->LockVertexBuffer(vbufSize);
+		FVector3 pos;
 
 		for (auto s = surfaceList.begin(); s != surfaceList.end(); s++)
 		{
@@ -483,20 +492,17 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 				for (unsigned int i = 0; i < 3; i++)
 				{
 					Vertex &v = t->vertex[i];
-					FVector3 pos(0, 0, 0);
+					pos.Zero();
 					for (unsigned int w = 0; w < 8; w++)
 					{
 						Weight &weight = v.weight[w];
 						if (weight.bias <= 0.0f)
 						{
-							continue;
+							break;
 						}
 
-						Node *node = skeleton.CheckKey(weight.nodeName);
-						if (node)
-						{
-							pos += (node->pos + RotateVector3(node->rot, weight.pos)) * weight.bias;
-						}
+						RNode &node = (*skeleton)[weight.nodeName];
+						pos += (node.pos + PreCalcRotateVector3(weight.pos, node.xyz, node.s, node.dot)) * weight.bias;
 					}
 
 					vertp->Set(pos.X, pos.Z, pos.Y, v.texCoord.X, v.texCoord.Y);
