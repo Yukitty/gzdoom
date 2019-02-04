@@ -22,7 +22,7 @@
 #include "r_data/models/models_smd.h"
 #include "w_wad.h"
 #include "sc_man.h"
-#include "v_text.h"
+//#include "v_text.h"
 
 /**
  * Parse an x-Dimensional vector
@@ -115,7 +115,21 @@ TMap<FName, FSMDModel::RNode> *FSMDModel::FlattenSkeleton()
 				parent = parent->parent;
 			}
 			rot.Unit();
-			skeleton[pair->Key] = RNode{pos, rot, rot.XYZ(), 2 * rot.W, (float)(pow(rot.W, 2) - (rot.XYZ() | rot.XYZ()))};
+			skeleton[pair->Key] = RNode{pos, rot, FMatrix3x3(
+				FVector3(
+					1.0f - 2.0f * pow(rot.Y, 2) - 2 * pow(rot.Z, 2),
+					2.0f * rot.X * rot.Y - 2.0f * rot.Z * rot.W,
+					2.0f * rot.X * rot.Z + 2.0f * rot.Y * rot.W
+				), FVector3(
+					2.0f * rot.X * rot.Y + 2 * rot.Z * rot.W,
+					1.0f - 2.0f * pow(rot.X, 2) - 2.0f * pow(rot.Z, 2),
+					2.0f * rot.Y * rot.Z - 2.0f * rot.X * rot.W
+				), FVector3(
+					2.0f * rot.X * rot.Z - 2.0f * rot.Y * rot.W,
+					2.0f * rot.Y * rot.Z + 2.0f * rot.X * rot.W,
+					1.0f - 2.0f * pow(rot.X, 2) - 2 * pow(rot.Y, 2)
+				)
+			)};
 		}
 	}
 	return &skeleton;
@@ -420,7 +434,6 @@ void FSMDModel::LoadAnim(const char *path, const char *name, int lumpnum)
 	if (FString(name).Len() > 0)
 	{
 		animNameIndex[name] = index;
-		Printf("Loaded %u frames for animation %s\n", anim.frames, name);
 	}
 }
 
@@ -502,7 +515,7 @@ void FSMDModel::RenderFrame(FModelRenderer *renderer, FTexture *skin, int framen
 						}
 
 						RNode &node = (*skeleton)[weight.nodeName];
-						pos += (node.pos + PreCalcRotateVector3(weight.pos, node.xyz, node.s, node.dot)) * weight.bias;
+						pos += (node.pos + weight.pos * node.rmatrix) * weight.bias;
 					}
 
 					vertp->Set(pos.X, pos.Z, pos.Y, v.texCoord.X, v.texCoord.Y);

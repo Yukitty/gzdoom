@@ -141,7 +141,7 @@ public:
 	virtual void AddSkins(uint8_t *hitlist) = 0;
 	virtual float getAspectFactor(FLevelLocals *) { return 1.f; }
 
-	virtual bool CanLoadAnim() { return false; };
+	virtual bool CanLoadAnim() const { return false; };
 	virtual void LoadAnim(const char *path, const char *name, int lumpnum) {};
 
 	void SetVertexBuffer(FModelRenderer *renderer, IModelVertexBuffer *buffer) { mVBuf[renderer->GetType()] = buffer; }

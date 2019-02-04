@@ -23,7 +23,7 @@
 
 #include "w_wad.h"
 #include "sc_man.h"
-#include "v_text.h"
+//#include "v_text.h"
 
 FSMDAnim::~FSMDAnim()
 {
@@ -228,23 +228,25 @@ unsigned int FSMDAnim::Load(const char* fn, int lumpnum, const char* buffer, int
  * @param frameno Local animation frame number to set the pose to
  * @param inter Pose interpolation bias to apply (1.0 to fully overwrite the existing pose)
  */
-void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, float inter)
+void FSMDAnim::SetPose(FSMDModel &model, unsigned int frameno, const float inter)
 {
 	if (frameno >= frame.Size())
 	{
-		Printf(TEXTCOLOR_RED "Invalid frameno %u\n", frameno);
 		return;
 	}
 
 	Node *node = frame[frameno].node;
-	for (unsigned int i = 0; i < nodeNames.Size(); i++)
+	if (inter >= 1.0f)
 	{
-		if (inter >= 1.0)
+		for (unsigned int i = 0; i < nodeNames.Size(); i++)
 		{
 			model.nodes[nodeNames[i]].pos = node[i].pos;
 			model.nodes[nodeNames[i]].rot = node[i].rot;
 		}
-		else
+	}
+	else
+	{
+		for (unsigned int i = 0; i < nodeNames.Size(); i++)
 		{
 			FSMDModel::Node &model_node = model.nodes[nodeNames[i]];
 			model_node.pos = node[i].pos * inter + model_node.pos * (1.0f - inter);

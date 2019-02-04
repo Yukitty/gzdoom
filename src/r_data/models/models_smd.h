@@ -47,8 +47,7 @@ private:
 	{
 		FVector3 pos;
 		FVector4 rot;
-		FVector3 xyz;
-		float s, dot;
+		FMatrix3x3 rmatrix;
 	};
 
 	struct Weight
@@ -104,7 +103,7 @@ public:
 	void BuildVertexBuffer(FModelRenderer* renderer) override;
 	void AddSkins(uint8_t* hitlist) override;
 
-	bool CanLoadAnim() override { return true; };
+	bool CanLoadAnim() const override { return true; };
 	void LoadAnim(const char *path, const char *name, int lumpnum) override;
 
 	friend class FSMDAnim;
